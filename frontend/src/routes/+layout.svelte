@@ -36,7 +36,7 @@
 {#if $loading}
     <Loader />
 {:else if $isAuthenticated}
-    <div class="flex min-h-screen bg-slate-50 dark:bg-slate-900">
+    <div class="flex min-h-screen bg-black">
         <Sidebar />
         <div class="flex flex-col flex-1 min-w-0">
             <main class="flex-1 overflow-x-hidden">
