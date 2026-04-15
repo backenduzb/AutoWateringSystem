@@ -1,11 +1,20 @@
-#!/bin/sh
+#!/bin/bash
 
 set -e
 
-python manage.py makemigrations --no-input
-python manage.py migrate --no-input
+export DJANGO_SETTINGS_MODULE=core.settings
+
+echo "📦 Running migrations..."
+python manage.py makemigrations --noinput
+python manage.py migrate --noinput
 
 python manage.py createadmin
 
-# WSGI (gunicorn) cannot serve WebSockets. Use ASGI so ESP32 + browser can connect.
-daphne -b 0.0.0.0 -p 8000 core.asgi:application
+exec gunicorn core.asgi:application \
+    -k uvicorn.workers.UvicornWorker \
+    --bind 0.0.0.0:8000 \
+    --workers 4 \
+    --threads 2 \
+    --timeout 120 \
+    --access-logfile - \
+    --error-logfile -

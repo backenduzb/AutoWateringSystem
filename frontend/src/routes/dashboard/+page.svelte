@@ -275,7 +275,6 @@
         </div>
 
         <div class="grid grid-cols-2 gap-5">
-            <!-- Namlik Card -->
             <div 
                 transition:fly={{ duration: 300, y: 20 }}
                 class="group relative overflow-hidden rounded-2xl bg-transparent backdrop-blur-md 
