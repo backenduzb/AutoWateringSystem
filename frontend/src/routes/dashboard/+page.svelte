@@ -1,19 +1,17 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import Chart from "chart.js/auto";
-    import { fly } from "svelte/transition";
     import { ROOT_URL } from "$lib";
     
-    // ============ STATE ============
     let current: any = $state(null);
     let history: any[] = $state([]);
     let isLoading = $state(true);
     let wsStatus = $state('connecting'); 
     let lastUpdate = $state<Date | null>(null);
     let chartCanvas: HTMLCanvasElement;
-    let chart: Chart | null = $state(null);
+    let chart: Chart | null = null;
     
-    // ============ HELPER FUNCTIONS ============
+    // ============ YORDAMCHI FUNKSIYALAR ============
     function getStatusClass() {
         if (wsStatus === 'connected') return 'bg-teal-400 animate-pulse';
         if (wsStatus === 'connecting') return 'bg-yellow-500 animate-pulse';
@@ -47,30 +45,7 @@
         return 'bg-cyan-500';
     }
 
-    // ============ CHART UPDATE ============
-    function updateChart() {
-        if (!chart) {
-            console.log("⚠️ Chart not initialized");
-            return;
-        }
-        
-        if (history.length === 0) {
-            console.log("📊 No history data");
-            return;
-        }
-
-        console.log(`📊 Updating chart with ${history.length} points`);
-        
-        chart.data.labels = history.map(i => {
-            const date = new Date(i.timestamp);
-            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        });
-
-        chart.data.datasets[0].data = history.map(i => i.value);
-        chart.update('none'); // 'none' - animatsiyasiz tezroq yangilanish
-    }
-
-    // ============ LOAD LATEST ============
+    // ============ MA'LUMOTLARNI YUKLASH ============
     async function loadLatest() {
         const token = localStorage.getItem("access");
         
@@ -79,14 +54,14 @@
             isLoading = false;
             return;
         }
-
+    
         try {
             const res = await fetch(`${ROOT_URL}/sensors/latest/`, {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
             });
-
+    
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             
             const json = await res.json();
@@ -98,7 +73,6 @@
                     value: current.value,
                     timestamp: current.timestamp || new Date().toISOString()
                 }];
-                updateChart();
             }
         } catch (err) {
             console.error("❌ Failed to load latest:", err);
@@ -106,98 +80,79 @@
             isLoading = false;
         }
     }
-
-    // ============ WEBSOCKET ============
-    let ws: WebSocket | null = null;
-    let reconnectTimer: any = null;
-
-    function connectWebSocket() {
-        const token = localStorage.getItem("access");
-        if (!token) {
-            console.error("❌ No token for WebSocket");
+    
+    // ============ CHART YANGILASH ============
+    function updateChartData() {
+        if (!chart) return;
+        
+        if (history.length === 0) {
+            chart.data.labels = [];
+            chart.data.datasets[0].data = [];
+            chart.update('none');
             return;
         }
-    
-        wsStatus = 'connecting';
         
-        const wsUrl = ROOT_URL.replace("https://", "wss://") + `/ws/updates/?token=${token}`;
-        console.log("🔌 Connecting to WebSocket:", wsUrl);
-    
-        ws = new WebSocket(wsUrl);
-    
-        ws.onopen = () => {
-            console.log("✅ WebSocket connected");
-            wsStatus = 'connected';
-        };
-    
-        ws.onmessage = (e) => {
-            try {
-                const msg = JSON.parse(e.data);
-                console.log("📨 Received:", msg);
-    
-                let newData = null;
-                
-                if (msg.type === "reading" && msg.data) {
-                    newData = msg.data;
-                } else if (msg.type === "sensor_update" && msg.data) {
-                    newData = msg.data;
-                } else if (msg.value != null) {
-                    newData = msg;
-                }
-                
-                if (newData && newData.value != null) {
-                    // MUHIM: Yangi state yaratish (reaktivlik uchun)
-                    current = { ...newData };
-                    lastUpdate = new Date();
-                    
-                    // History ni yangilash (reaktivlik uchun yangi array)
-                    const newHistoryPoint = {
-                        value: newData.value,
-                        timestamp: newData.timestamp || new Date().toISOString()
-                    };
-                    
-                    history = [...history.slice(-19), newHistoryPoint];
-                    
-                    console.log(`📊 History: ${history.length} points, Current: ${newData.value}%`);
-                    
-                    // Chartni yangilash
-                    updateChart();
-                }
-            } catch (err) {
-                console.error("❌ Parse error:", err);
-            }
-        };
-    
-        ws.onerror = (err) => {
-            console.error("❌ WS error:", err);
-            wsStatus = 'error';
-        };
-    
-        ws.onclose = () => {
-            console.log("❌ WS closed");
-            wsStatus = 'error';
-            
-            // Auto reconnect
-            if (reconnectTimer) clearTimeout(reconnectTimer);
-            reconnectTimer = setTimeout(() => {
-                console.log("🔄 Reconnecting...");
-                connectWebSocket();
-            }, 3000);
-        };
+        // Vaqt va namlik ma'lumotlarini tayyorlash
+        const labels = history.map(h => {
+            const date = new Date(h.timestamp);
+            return date.toLocaleTimeString('uz-UZ', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        });
+        
+        const values = history.map(h => h.value);
+        
+        // Chart ma'lumotlarini yangilash
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = values;
+        
+        // Smooth yangilanish (animatsiya bilan)
+        chart.update('active');
+        
+        console.log(`📊 Chart updated: ${labels.length} points, Latest: ${values[values.length-1]}%`);
     }
-
-    function disconnectWebSocket() {
-        if (reconnectTimer) clearTimeout(reconnectTimer);
-        if (ws) {
-            ws.close();
-            ws = null;
+    
+    // ============ YANGI MA'LUMOT QO'SHISH ============
+    function addNewReading(newData: any) {
+        if (!newData || newData.value == null) return;
+        
+        console.log(`📈 Adding new reading: ${newData.value}% at ${newData.timestamp}`);
+        
+        // Current ni yangilash
+        current = newData;
+        lastUpdate = new Date();
+        
+        // History ni yangilash (immutable)
+        const newPoint = {
+            value: newData.value,
+            timestamp: newData.timestamp || new Date().toISOString()
+        };
+        
+        // Yangi array yaratish (Svelte 5 reaktivligi uchun)
+        const updatedHistory = [...history, newPoint];
+        
+        // Faqat 20 ta nuqta saqlash
+        if (updatedHistory.length > 20) {
+            history = updatedHistory.slice(-20);
+        } else {
+            history = updatedHistory;
         }
+        
+        // Chart ni darhol yangilash (history o'zgarishini kutmasdan)
+        if (chart) {
+            updateChartData();
+        }
+        
+        console.log(`📊 History size: ${history.length}, Current: ${current.value}%`);
     }
-
-    // ============ INIT CHART ============
+    
+    // ============ CHART INIT ============
     function initChart() {
         if (!chartCanvas) {
             console.log("⚠️ Canvas not ready");
+            setTimeout(initChart, 100);
             return;
         }
         
@@ -233,7 +188,8 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 animation: {
-                    duration: 0 // Real-time uchun animatsiyani o'chirish
+                    duration: 750,
+                    easing: 'easeInOutQuart'
                 },
                 plugins: {
                     legend: {
@@ -264,45 +220,180 @@
                         beginAtZero: true,
                         max: 100,
                         grid: { color: "#334155", drawBorder: false },
-                        title: { display: true, text: "Namlik (%)", color: "#94a3b8", font: { size: 11 } },
-                        ticks: { color: "#94a3b8", stepSize: 20, callback: (v) => v + "%" }
+                        title: { 
+                            display: true, 
+                            text: "Namlik (%)", 
+                            color: "#94a3b8", 
+                            font: { size: 11 } 
+                        },
+                        ticks: { 
+                            color: "#94a3b8", 
+                            stepSize: 20, 
+                            callback: (v) => v + "%" 
+                        }
                     },
                     x: {
                         grid: { display: false, drawBorder: false },
-                        title: { display: true, text: "Vaqt", color: "#94a3b8", font: { size: 11 } },
-                        ticks: { color: "#94a3b8", maxRotation: 45, minRotation: 45 }
+                        title: { 
+                            display: true, 
+                            text: "Vaqt", 
+                            color: "#94a3b8", 
+                            font: { size: 11 } 
+                        },
+                        ticks: { 
+                            color: "#94a3b8", 
+                            maxRotation: 45, 
+                            minRotation: 45,
+                            autoSkip: true,
+                            maxTicksLimit: 10
+                        }
                     }
                 },
-                interaction: { mode: 'nearest', axis: 'x', intersect: false }
+                interaction: { 
+                    mode: 'nearest', 
+                    axis: 'x', 
+                    intersect: false 
+                }
             }
         });
         
-        console.log("✅ Chart initialized");
-        
-        // Agar history bo'lsa, chartni yangilash
+        // Initial ma'lumotlarni yuklash
         if (history.length > 0) {
-            updateChart();
+            updateChartData();
+        }
+        
+        console.log("✅ Chart initialized");
+    }
+    
+    // ============ WEBSOCKET ============
+    let ws: WebSocket | null = null;
+    let reconnectTimer: any = null;
+    let reconnectAttempts = 0;
+    
+    function connectWebSocket() {
+        const token = localStorage.getItem("access");
+        if (!token) {
+            console.error("❌ No token for WebSocket");
+            wsStatus = 'error';
+            setTimeout(connectWebSocket, 5000);
+            return;
+        }
+    
+        wsStatus = 'connecting';
+        reconnectAttempts++;
+        
+        const wsUrl = ROOT_URL.replace("https://", "wss://").replace("http://", "ws://") + `/ws/updates/?token=${token}`;
+        console.log(`🔌 Connecting to WebSocket (attempt ${reconnectAttempts}):`, wsUrl);
+    
+        try {
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                console.log("✅ WebSocket connected");
+                wsStatus = 'connected';
+                reconnectAttempts = 0;
+            };
+        
+            ws.onmessage = (e) => {
+                try {
+                    const msg = JSON.parse(e.data);
+                    console.log("📨 Received:", msg);
+        
+                    let newData = null;
+                    
+                    if (msg.type === "reading" && msg.data) {
+                        newData = msg.data;
+                    } else if (msg.type === "sensor_update" && msg.data) {
+                        newData = msg.data;
+                    } else if (msg.value != null) {
+                        newData = msg;
+                    }
+                    
+                    if (newData && newData.value != null) {
+                        // Yangi ma'lumotni qo'shish
+                        addNewReading(newData);
+                    }
+                } catch (err) {
+                    console.error("❌ Parse error:", err);
+                }
+            };
+        
+            ws.onerror = (err) => {
+                console.error("❌ WS error:", err);
+                wsStatus = 'error';
+            };
+        
+            ws.onclose = (event) => {
+                console.log(`❌ WS closed (code: ${event.code}, reason: ${event.reason})`);
+                wsStatus = 'error';
+                
+                // Reconnect with exponential backoff
+                if (reconnectTimer) clearTimeout(reconnectTimer);
+                const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(reconnectAttempts, 5)));
+                console.log(`🔄 Reconnecting in ${delay}ms...`);
+                
+                reconnectTimer = setTimeout(() => {
+                    connectWebSocket();
+                }, delay);
+            };
+        } catch (err) {
+            console.error("❌ Failed to create WebSocket:", err);
+            wsStatus = 'error';
+            setTimeout(connectWebSocket, 5000);
         }
     }
 
-    // ============ WATCH HISTORY FOR CHART ============
-    // Svelte 5 da history o'zgarganda chartni yangilash
+    function disconnectWebSocket() {
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+        if (ws) {
+            ws.close();
+            ws = null;
+        }
+        reconnectAttempts = 0;
+    }
+    
+    // ============ SVELTE 5 REAKTIVLIK ============
+    // History o'zgarganda chartni yangilash (backup)
     $effect(() => {
         if (history.length > 0 && chart) {
-            updateChart();
+            console.log("🔄 Effect: History changed, updating chart");
+            updateChartData();
         }
     });
-
+    
+    // Current o'zgarganda DOM elementlarni yangilash
+    $effect(() => {
+        if (current?.value != null) {
+            // Bu effect faqat UI yangilanishi uchun
+            console.log(`🔄 Effect: Current value changed to ${current.value}%`);
+        }
+    });
+    
+    // Chart canvas tayyor bo'lganda init
+    $effect(() => {
+        if (chartCanvas && !chart) {
+            console.log("🎨 Canvas ready, initializing chart...");
+            setTimeout(() => {
+                initChart();
+            }, 50);
+        }
+    });
+    
     // ============ ON MOUNT ============
     onMount(async () => {
         console.log("🚀 Component mounted");
         
         await loadLatest();
-        initChart();
+        
+        // WebSocket ulanish
         connectWebSocket();
         
+        // Cleanup
         return () => {
-            console.log("🧹 Cleaning up");
+            console.log("🧹 Cleaning up components");
             disconnectWebSocket();
             if (chart) {
                 chart.destroy();
@@ -314,6 +405,8 @@
 
 <div class="min-h-screen bg-black">
     <div class="fixed p-6 space-y-6 mt-10 w-[80%] right-10 top-6 h-screen overflow-y-auto">
+        
+        <!-- Header -->
         <div class="flex items-center justify-between">
             <div>
                 <h1 class="text-2xl font-bold text-white">Sensor Dashboard</h1>
@@ -333,7 +426,10 @@
                 </div>
             </div>
         </div>
+
+        <!-- Stats Cards -->
         <div class="grid grid-cols-2 gap-5">
+            <!-- Namlik Card -->
             <div class="group relative overflow-hidden rounded-2xl bg-transparent backdrop-blur-md 
                         border border-teal-700 hover:border-teal-500/30 transition-all duration-300">
                 <div class="absolute top-0 right-0 w-32 h-32 bg-teal-500/5 rounded-full blur-2xl -mr-16 -mt-16"></div>
@@ -366,6 +462,7 @@
                 </div>
             </div>
             
+            <!-- Holat Card -->
             <div class="group relative overflow-hidden rounded-2xl bg-transparent backdrop-blur-md 
                         border border-teal-700 hover:border-teal-500/30 transition-all duration-300">
                 <div class="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 rounded-full blur-2xl -mr-16 -mt-16"></div>
@@ -402,6 +499,7 @@
             </div>
         </div>
         
+        <!-- Chart -->
         <div class="rounded-2xl bg-transparent backdrop-blur-md border border-teal-700 
                     hover:border-teal-500/30 transition-all duration-300 overflow-hidden">
             <div class="border-b border-teal-700 px-6 py-4">
@@ -427,6 +525,7 @@
         </div>
         
         <div class="text-center text-xs text-slate-600 pt-4">
+            <p>Real-time sensor monitoring | WebSocket connection</p>
         </div>
     </div>
 </div>

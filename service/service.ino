@@ -5,10 +5,13 @@
 const char* ssid = "KOM_105";
 const char* password = "*kom105!0";
 
-// Railway backend - HTML testda ishlagan URL
+// Railway backend
 const char* serverHost = "autowateringapi.up.railway.app";
-const int serverPort = 80;  // HTTP port (ws://)
-const char* secretToken = "esp32_secret_token_123";  // HTML dagi bilan bir xil!
+const int serverPort = 443;  // SSL port
+const char* secretToken = "esp32";
+
+// Fingerprint (ixtiyoriy, SSL tekshiruvi uchun)
+// const char* fingerprint = "YOUR_CERT_FINGERPRINT";
 
 #define SOIL_SENSOR_PIN 34
 
@@ -33,17 +36,25 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
       Serial.println("✅ WebSocket connected!");
       wsConnected = true;
       // Ulanish xabarini yuborish
-      webSocket.sendTXT("{\"type\":\"connect\",\"message\":\"ESP32 connected\"}");
+      webSocket.sendTXT("{\"type\":\"connect\",\"message\":\"ESP32 soil sensor connected\"}");
       break;
       
     case WStype_TEXT:
-      Serial.print("📥 Server: ");
+      Serial.print("📥 Server response: ");
       Serial.println((char*)payload);
       break;
       
     case WStype_ERROR:
       Serial.println("❌ WebSocket error!");
       wsConnected = false;
+      break;
+      
+    case WStype_PING:
+      Serial.println("📡 Ping received");
+      break;
+      
+    case WStype_PONG:
+      Serial.println("📡 Pong received");
       break;
   }
 }
@@ -73,7 +84,7 @@ int readSoilMoisture() {
 
 // ============ WIFI ============
 void connectToWiFi() {
-  Serial.print("Connecting to WiFi: ");
+  Serial.print("📡 Connecting to WiFi: ");
   Serial.println(ssid);
   
   WiFi.begin(ssid, password);
@@ -89,20 +100,36 @@ void connectToWiFi() {
     Serial.println("\n✅ WiFi connected!");
     Serial.print("📡 IP: ");
     Serial.println(WiFi.localIP());
+    Serial.print("📡 Gateway: ");
+    Serial.println(WiFi.gatewayIP());
   } else {
-    Serial.println("\n❌ WiFi failed!");
+    Serial.println("\n❌ WiFi connection failed!");
   }
 }
 
 // ============ WEBSOCKET ============
 void connectToWebSocket() {
-  Serial.println("🔌 Connecting to WebSocket...");
+  Serial.println("\n🔌 Connecting to WebSocket...");
+  Serial.print("🌐 Server: ");
+  Serial.println(serverHost);
+  Serial.print("🔌 Port: ");
+  Serial.println(serverPort);
   
   String wsPath = "/ws/sensors/?secret=" + String(secretToken);
-
-  webSocket.beginSSL(serverHost, 443, wsPath); // 🔥 MUHIM
+  Serial.print("📡 Path: ");
+  Serial.println(wsPath);
+  
+  // SSL ulanish (wss://)
+  webSocket.beginSSL(serverHost, serverPort, wsPath);
+  
+  // Agar SSL ishlamasa, HTTP ni sinab ko'ring:
+  // webSocket.begin(serverHost, 80, wsPath);
+  
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(5000);
+  
+  // Extra headers (agar kerak bo'lsa)
+  // webSocket.setExtraHeaders("User-Agent: ESP32\r\n");
 }
 
 // ============ SETUP ============
@@ -114,13 +141,18 @@ void setup() {
   Serial.println("ESP32 Soil Moisture Sensor");
   Serial.println("=================================\n");
   
+  // Sensor
   pinMode(SOIL_SENSOR_PIN, INPUT);
-  Serial.println("✅ Soil sensor ready");
+  Serial.println("✅ Soil moisture sensor ready");
   
+  // WiFi
   connectToWiFi();
   
+  // WebSocket
   if (WiFi.status() == WL_CONNECTED) {
     connectToWebSocket();
+  } else {
+    Serial.println("❌ Cannot connect to WebSocket - WiFi not connected");
   }
   
   Serial.println("\n✅ System ready!\n");
@@ -128,8 +160,10 @@ void setup() {
 
 // ============ LOOP ============
 void loop() {
+  // WebSocket loop
   webSocket.loop();
   
+  // WiFi tekshirish
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("⚠️ WiFi lost, reconnecting...");
     connectToWiFi();
@@ -138,6 +172,7 @@ void loop() {
     }
   }
   
+  // Ma'lumot yuborish
   unsigned long now = millis();
   if (now - lastSendTime >= sendInterval) {
     lastSendTime = now;
@@ -162,10 +197,18 @@ void loop() {
           Serial.println("💧 Status: WET 💧");
         }
       } else {
-        Serial.println("⚠️ Sensor error!");
+        Serial.println("⚠️ Sensor read error!");
       }
     } else {
-      Serial.println("⏳ Waiting for WebSocket...");
+      Serial.println("⏳ Waiting for WebSocket connection...");
+      
+      // Qayta ulanish
+      static unsigned long lastReconnect = 0;
+      if (now - lastReconnect > 10000) {
+        lastReconnect = now;
+        Serial.println("🔄 Attempting to reconnect WebSocket...");
+        connectToWebSocket();
+      }
     }
   }
   
