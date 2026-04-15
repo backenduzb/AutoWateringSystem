@@ -15,4 +15,6 @@ extern const int WET_VALUE;
 
 extern const unsigned long sendInterval;
 
+extern const int INM;
+
 #endif

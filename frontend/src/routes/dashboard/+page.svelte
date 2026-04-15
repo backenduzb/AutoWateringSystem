@@ -11,6 +11,16 @@
     let chartCanvas: HTMLCanvasElement;
     let chart: Chart | null = null;
     
+    // Motor state
+    let motorState = $state(false);
+    let motorLoading = $state(false);
+    
+    // WebSocket connection
+    let ws: WebSocket | null = null;
+    let motorWs: WebSocket | null = null;  // Motor control uchun alohida WebSocket
+    let reconnectTimer: any = null;
+    let reconnectAttempts = 0;
+    
     // ============ YORDAMCHI FUNKSIYALAR ============
     function getStatusClass() {
         if (wsStatus === 'connected') return 'bg-teal-400 animate-pulse';
@@ -44,6 +54,52 @@
         if (value < 60) return 'bg-teal-500';
         return 'bg-cyan-500';
     }
+    
+    // ============ MOTOR CONTROL ============
+    async function controlMotor(action: 'on' | 'off') {
+        const token = localStorage.getItem("access");
+        
+        if (!token) {
+            console.error("❌ No token found");
+            return;
+        }
+        
+        motorLoading = true;
+        
+        // 1-usul: REST API orqali
+        try {
+            const response = await fetch(`${ROOT_URL}/sensors/motor/control/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Token ${token}`
+                },
+                body: JSON.stringify({ state: action === 'on' })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const result = await response.json();
+            motorState = action === 'on';
+            console.log(`✅ Motor turned ${action.toUpperCase()}:`, result);
+            
+        } catch (err) {
+            console.error(`❌ Failed to turn motor via REST API:`, err);
+            
+            // 2-usul: WebSocket orqali (backup)
+            if (motorWs && motorWs.readyState === WebSocket.OPEN) {
+                motorWs.send(JSON.stringify({
+                    command: action === 'on' ? 'ON' : 'OFF'
+                }));
+                console.log(`📡 Sent motor command via WebSocket: ${action.toUpperCase()}`);
+                motorState = action === 'on';
+            }
+        } finally {
+            motorLoading = false;
+        }
+    }
 
     // ============ MA'LUMOTLARNI YUKLASH ============
     async function loadLatest() {
@@ -58,7 +114,7 @@
         try {
             const res = await fetch(`${ROOT_URL}/sensors/latest/`, {
                 headers: {
-                    Authorization: `Bearer ${token}`
+                    Authorization: `Token ${token}`
                 }
             });
     
@@ -74,6 +130,12 @@
                     timestamp: current.timestamp || new Date().toISOString()
                 }];
             }
+            
+            // Motor state ni ham yuklash
+            if (json.motor_state !== undefined) {
+                motorState = json.motor_state;
+            }
+            
         } catch (err) {
             console.error("❌ Failed to load latest:", err);
         } finally {
@@ -92,7 +154,6 @@
             return;
         }
         
-        // Vaqt va namlik ma'lumotlarini tayyorlash
         const labels = history.map(h => {
             const date = new Date(h.timestamp);
             return date.toLocaleTimeString('uz-UZ', { 
@@ -104,11 +165,8 @@
         
         const values = history.map(h => h.value);
         
-        // Chart ma'lumotlarini yangilash
         chart.data.labels = labels;
         chart.data.datasets[0].data = values;
-        
-        // Smooth yangilanish (animatsiya bilan)
         chart.update('active');
         
         console.log(`📊 Chart updated: ${labels.length} points, Latest: ${values[values.length-1]}%`);
@@ -120,27 +178,22 @@
         
         console.log(`📈 Adding new reading: ${newData.value}% at ${newData.timestamp}`);
         
-        // Current ni yangilash
         current = newData;
         lastUpdate = new Date();
         
-        // History ni yangilash (immutable)
         const newPoint = {
             value: newData.value,
             timestamp: newData.timestamp || new Date().toISOString()
         };
         
-        // Yangi array yaratish (Svelte 5 reaktivligi uchun)
         const updatedHistory = [...history, newPoint];
         
-        // Faqat 20 ta nuqta saqlash
         if (updatedHistory.length > 20) {
             history = updatedHistory.slice(-20);
         } else {
             history = updatedHistory;
         }
         
-        // Chart ni darhol yangilash (history o'zgarishini kutmasdan)
         if (chart) {
             updateChartData();
         }
@@ -257,7 +310,6 @@
             }
         });
         
-        // Initial ma'lumotlarni yuklash
         if (history.length > 0) {
             updateChartData();
         }
@@ -265,11 +317,7 @@
         console.log("✅ Chart initialized");
     }
     
-    // ============ WEBSOCKET ============
-    let ws: WebSocket | null = null;
-    let reconnectTimer: any = null;
-    let reconnectAttempts = 0;
-    
+    // ============ WEBSOCKET (Sensor Updates) ============
     function connectWebSocket() {
         const token = localStorage.getItem("access");
         if (!token) {
@@ -301,6 +349,7 @@
         
                     let newData = null;
                     
+                    // Backend consumers.py dan kelgan format
                     if (msg.type === "reading" && msg.data) {
                         newData = msg.data;
                     } else if (msg.type === "sensor_update" && msg.data) {
@@ -310,9 +359,15 @@
                     }
                     
                     if (newData && newData.value != null) {
-                        // Yangi ma'lumotni qo'shish
                         addNewReading(newData);
                     }
+                    
+                    // Motor status ni yangilash
+                    if (msg.motor_state !== undefined) {
+                        motorState = msg.motor_state;
+                        console.log(`🔄 Motor state updated: ${motorState ? 'ON' : 'OFF'}`);
+                    }
+                    
                 } catch (err) {
                     console.error("❌ Parse error:", err);
                 }
@@ -327,7 +382,6 @@
                 console.log(`❌ WS closed (code: ${event.code}, reason: ${event.reason})`);
                 wsStatus = 'error';
                 
-                // Reconnect with exponential backoff
                 if (reconnectTimer) clearTimeout(reconnectTimer);
                 const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(reconnectAttempts, 5)));
                 console.log(`🔄 Reconnecting in ${delay}ms...`);
@@ -342,8 +396,42 @@
             setTimeout(connectWebSocket, 5000);
         }
     }
+    
+    // ============ MOTOR WEBSOCKET (Motor Control) ============
+    function connectMotorWebSocket() {
+        const token = localStorage.getItem("access");
+        if (!token) {
+            console.error("❌ No token for Motor WebSocket");
+            setTimeout(connectMotorWebSocket, 5000);
+            return;
+        }
+        
+        const wsUrl = ROOT_URL.replace("https://", "wss://").replace("http://", "ws://") + `/ws/motor/control/?token=${token}`;
+        console.log(`🔌 Connecting to Motor WebSocket:`, wsUrl);
+        
+        try {
+            motorWs = new WebSocket(wsUrl);
+            
+            motorWs.onopen = () => {
+                console.log("✅ Motor WebSocket connected");
+            };
+            
+            motorWs.onerror = (err) => {
+                console.error("❌ Motor WS error:", err);
+            };
+            
+            motorWs.onclose = () => {
+                console.log("❌ Motor WebSocket closed, reconnecting...");
+                setTimeout(connectMotorWebSocket, 5000);
+            };
+            
+        } catch (err) {
+            console.error("❌ Failed to create Motor WebSocket:", err);
+            setTimeout(connectMotorWebSocket, 5000);
+        }
+    }
 
-    function disconnectWebSocket() {
+    function disconnectWebSockets() {
         if (reconnectTimer) {
             clearTimeout(reconnectTimer);
             reconnectTimer = null;
@@ -352,30 +440,22 @@
             ws.close();
             ws = null;
         }
+        if (motorWs) {
+            motorWs.close();
+            motorWs = null;
+        }
         reconnectAttempts = 0;
     }
     
     // ============ SVELTE 5 REAKTIVLIK ============
-    // History o'zgarganda chartni yangilash (backup)
     $effect(() => {
         if (history.length > 0 && chart) {
-            console.log("🔄 Effect: History changed, updating chart");
             updateChartData();
         }
     });
     
-    // Current o'zgarganda DOM elementlarni yangilash
-    $effect(() => {
-        if (current?.value != null) {
-            // Bu effect faqat UI yangilanishi uchun
-            console.log(`🔄 Effect: Current value changed to ${current.value}%`);
-        }
-    });
-    
-    // Chart canvas tayyor bo'lganda init
     $effect(() => {
         if (chartCanvas && !chart) {
-            console.log("🎨 Canvas ready, initializing chart...");
             setTimeout(() => {
                 initChart();
             }, 50);
@@ -387,14 +467,12 @@
         console.log("🚀 Component mounted");
         
         await loadLatest();
-        
-        // WebSocket ulanish
         connectWebSocket();
+        connectMotorWebSocket();
         
-        // Cleanup
         return () => {
             console.log("🧹 Cleaning up components");
-            disconnectWebSocket();
+            disconnectWebSockets();
             if (chart) {
                 chart.destroy();
                 chart = null;
@@ -428,7 +506,7 @@
         </div>
 
         <!-- Stats Cards -->
-        <div class="grid grid-cols-2 gap-5">
+        <div class="grid grid-cols-3 gap-5">
             <!-- Namlik Card -->
             <div class="group relative overflow-hidden rounded-2xl bg-transparent backdrop-blur-md 
                         border border-teal-700 hover:border-teal-500/30 transition-all duration-300">
@@ -497,6 +575,71 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- Motor Control Card -->
+            <div class="group relative overflow-hidden rounded-2xl bg-transparent backdrop-blur-md 
+                        border border-teal-700 hover:border-teal-500/30 transition-all duration-300">
+                <div class="absolute top-0 right-0 w-32 h-32 bg-purple-500/5 rounded-full blur-2xl -mr-16 -mt-16"></div>
+                <div class="relative p-5">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="p-2 rounded-xl bg-purple-500/10">
+                            <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                      d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                            </svg>
+                        </div>
+                        <span class="text-xs text-teal-500">MOTOR BOSHQARISH</span>
+                    </div>
+                    
+                    <div class="flex gap-3 mt-2">
+                        <button 
+                            onclick={() => controlMotor('on')}
+                            disabled={motorLoading || motorState}
+                            class="flex-1 py-3 rounded-xl font-semibold transition-all duration-300
+                                   {motorState 
+                                     ? 'bg-emerald-500/20 border border-emerald-500 text-emerald-400 cursor-not-allowed' 
+                                     : 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white shadow-lg hover:shadow-emerald-500/25'
+                                   } disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {#if motorLoading && !motorState}
+                                <svg class="animate-spin h-5 w-5 mx-auto" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                            {:else}
+                                🔛 YOQISH
+                            {/if}
+                        </button>
+                        
+                        <button 
+                            onclick={() => controlMotor('off')}
+                            disabled={motorLoading || !motorState}
+                            class="flex-1 py-3 rounded-xl font-semibold transition-all duration-300
+                                   {!motorState 
+                                     ? 'bg-red-500/20 border border-red-500 text-red-400 cursor-not-allowed' 
+                                     : 'bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white shadow-lg hover:shadow-red-500/25'
+                                   } disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {#if motorLoading && motorState}
+                                <svg class="animate-spin h-5 w-5 mx-auto" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                            {:else}
+                                🔴 O'CHIRISH
+                            {/if}
+                        </button>
+                    </div>
+                    
+                    <!-- Motor status indicator -->
+                    <div class="mt-3 flex items-center justify-center gap-2">
+                        <div class="w-2 h-2 rounded-full {motorState ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}"></div>
+                        <span class="text-xs text-slate-400">
+                            Motor {motorState ? 'yoqilgan ✅' : 'o\'chirilgan ❌'}
+                        </span>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <!-- Chart -->
@@ -525,7 +668,7 @@
         </div>
         
         <div class="text-center text-xs text-slate-600 pt-4">
-            <p>Real-time sensor monitoring | WebSocket connection</p>
+            <p>Real-time sensor monitoring | WebSocket connection | Motor control</p>
         </div>
     </div>
 </div>
