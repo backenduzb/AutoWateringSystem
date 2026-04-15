@@ -1,19 +1,22 @@
 from __future__ import annotations
 
-from typing import Callable, Awaitable, Optional
+from typing import Optional
 from urllib.parse import parse_qs
 
 from asgiref.sync import sync_to_async
 from channels.middleware import BaseMiddleware
-from django.contrib.auth import get_user_model
-from django.contrib.auth.models import AnonymousUser
-from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
-from rest_framework_simplejwt.settings import api_settings
-from rest_framework_simplejwt.tokens import UntypedToken
+
+
+def get_anonymous_user():
+    from django.contrib.auth.models import AnonymousUser
+    return AnonymousUser()
 
 
 @sync_to_async
-def _get_user(user_id: int):
+def _get_user(user_id):
+    from django.contrib.auth.models import AnonymousUser
+    from django.contrib.auth import get_user_model
+    
     User = get_user_model()
     try:
         return User.objects.get(id=user_id)
@@ -22,6 +25,7 @@ def _get_user(user_id: int):
 
 
 def _get_token_from_scope(scope) -> Optional[str]:
+    
     query = parse_qs(scope.get("query_string", b"").decode("utf-8"))
     token = query.get("token", [None])[0]
     if token:
@@ -39,18 +43,22 @@ def _get_token_from_scope(scope) -> Optional[str]:
 
 class JwtAuthMiddleware(BaseMiddleware):
     async def __call__(self, scope, receive, send):
+        from django.contrib.auth.models import AnonymousUser
+        from rest_framework_simplejwt.tokens import AccessToken
+        from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+        
         token = _get_token_from_scope(scope)
         scope["user"] = AnonymousUser()
 
         if token:
             try:
-                UntypedToken(token)
-                decoded = api_settings.TOKEN_BACKEND.decode(token, verify=True)
-                user_id = decoded.get(api_settings.USER_ID_CLAIM)
+                # AccessToken yordamida tokenni tekshirish
+                access_token = AccessToken(token)
+                user_id = access_token.get('user_id')
+                
                 if user_id is not None:
                     scope["user"] = await _get_user(int(user_id))
-            except (InvalidToken, TokenError, ValueError):
+            except (InvalidToken, TokenError, ValueError, KeyError):
                 scope["user"] = AnonymousUser()
 
         return await super().__call__(scope, receive, send)
-

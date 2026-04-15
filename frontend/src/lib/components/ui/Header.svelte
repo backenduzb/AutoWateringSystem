@@ -75,7 +75,7 @@
                        transition cursor-pointer"
             >
                 <span
-                    class="text-sm font-medium text-teal-400 hidden sm:block max-w-32 truncate"
+                    class="text-sm font-medium text-teal-400 hidden sm:block max-w-64 truncate"
                 >
                     {fullName}
                 </span>
