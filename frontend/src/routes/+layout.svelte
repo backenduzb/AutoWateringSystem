@@ -5,9 +5,10 @@
     import { goto } from "$app/navigation";
     import { page } from "$app/stores";
 
-    import Loader from "$lib/components/Loader.svelte";
-    import Sidebar from "$lib/components/Menu.svelte";
-
+    import Loader from "$lib/components/ui/Loader.svelte";
+    import Sidebar from "$lib/components/ui/Menu.svelte";
+    import Header from "$lib/components/ui/Header.svelte";
+    
     import "./app.css";
 
     let authChecked = false;
@@ -38,7 +39,8 @@
 {:else if $isAuthenticated}
     <div class="flex min-h-screen bg-black">
         <Sidebar />
-        <div class="flex flex-col flex-1 min-w-0">
+        <div class="flex flex-col flex-1 min-w-0 bg-black">
+            <Header></Header>
             <main class="flex-1 overflow-x-hidden">
                 <slot />
             </main>

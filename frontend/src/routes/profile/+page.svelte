@@ -4,7 +4,6 @@
     import { logout } from "$lib/auth";
     import { ROOT_URL } from "$lib/index";
 
-
     let first_name = "";
     let last_name = "";
     let password = "";
@@ -75,17 +74,17 @@
     }
 
     const inputClass = (field: string) =>
-        `w-full h-11 px-3 rounded-lg border transition focus:outline-none focus:ring-3 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 ${
+        `w-full h-11 px-3 rounded-lg border transition focus:outline-none focus:ring-3 bg-transparent bg-teal-700 text-white ${
             fieldErrors[field]
                 ? "border-red-500 focus:ring-red-500/50 focus:border-red-500 dark:border-red-400"
-                : "border-slate-300 dark:border-slate-600 focus:ring-blue-500/50 focus:border-blue-500"
+                : "border-teal-300 focus:ring-teal-500/50 focus:border-teal-500"
         }`;
 </script>
 
-<div class="min-h-full bg-slate-50 dark:bg-slate-900">
+<div class="min-h-full bg-black">
     <main class="max-w-xl mx-auto px-4 py-8 space-y-5">
         <div
-            class="flex items-center gap-4 border border-teal-800 rounded shadow-sm px-6 py-5"
+            class="flex items-center gap-4 border border-teal-800 rounded-2xl shadow-sm px-6 py-5"
         >
             <div
                 class="w-14 h-14 rounded-full bg-teal-500 flex items-center justify-center text-white text-xl font-bold select-none shrink-0"
@@ -95,34 +94,27 @@
                 ).toUpperCase()}
             </div>
             <div>
-                <p
-                    class="text-lg font-semibold text-slate-800 dark:text-slate-100"
-                >
+                <p class="text-lg font-semibold text-teal-800">
                     {$user?.data?.first_name ?? ""}
                     {$user?.data?.last_name ?? ""}
                 </p>
-                <p class="text-sm text-slate-500 dark:text-slate-400">
+                <p class="text-sm dark:text-slate-400">
                     @{$user?.data?.username ?? ""}
                 </p>
                 {#if $user?.data?.department}
                     <span
                         class="inline-block mt-1 text-xs font-medium bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-800 rounded-full px-2.5 py-0.5"
                     >
-                        {$user.data.department.name}
                     </span>
                 {/if}
             </div>
         </div>
 
         <div
-            class="rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden"
+            class="rounded-2xl border dark:border-teal-700 shadow-sm overflow-hidden"
         >
-            <div
-                class="px-6 py-4 border-b border-slate-100 dark:border-slate-700"
-            >
-                <h2
-                    class="text-base font-semibold text-slate-800 dark:text-slate-100"
-                >
+            <div class="px-6 py-4 border-b border-teal-700">
+                <h2 class="text-base font-semibold text-teal-500">
                     Tahrirlash
                 </h2>
             </div>
@@ -130,26 +122,24 @@
             <form onsubmit={handleUpdate} class="px-6 py-5 space-y-4">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="flex flex-col gap-1.5">
-                        <p
-                            class="text-sm font-medium text-slate-500 dark:text-slate-400"
-                        >
+                        <p class="text-sm font-medium text-teal-500">
                             Username
                         </p>
                         <div
-                            class="w-full h-11 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700 flex items-center text-slate-500 dark:text-slate-400 text-sm select-none"
+                            class="w-full h-11 px-3 rounded-lg border border-teal-700 flex items-center text-teal-500 text-sm select-none"
                         >
                             @{$user?.data?.username ?? ""}
                         </div>
                     </div>
                 </div>
 
-                <hr class="border-slate-100 dark:border-slate-700" />
+                <hr class=" border-teal-700" />
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="flex flex-col gap-1.5">
                         <label
                             for="first_name"
-                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            class="text-sm font-medium text-teal-400"
                         >
                             Ism
                         </label>
@@ -160,7 +150,7 @@
                             class={inputClass("first_name")}
                         />
                         {#if fieldErrors.first_name}
-                            <span class="text-xs text-red-500 dark:text-red-400"
+                            <span class="text-xs  text-red-400"
                                 >{fieldErrors.first_name}</span
                             >
                         {/if}
@@ -169,7 +159,7 @@
                     <div class="flex flex-col gap-1.5">
                         <label
                             for="last_name"
-                            class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                            class="text-sm font-medium text-teal-400"
                         >
                             Familya
                         </label>
@@ -180,7 +170,7 @@
                             class={inputClass("last_name")}
                         />
                         {#if fieldErrors.last_name}
-                            <span class="text-xs text-red-500 dark:text-red-400"
+                            <span class="text-xs  text-red-400"
                                 >{fieldErrors.last_name}</span
                             >
                         {/if}
@@ -190,13 +180,10 @@
                 <div class="flex flex-col gap-1.5">
                     <label
                         for="password"
-                        class="text-sm font-medium text-slate-700 dark:text-slate-300"
+                        class="text-sm font-medium text-teal-400"
                     >
                         Yangi parol
-                        <span
-                            class="text-slate-400 dark:text-slate-500 font-normal"
-                            ></span
-                        >
+                        <span class="dark:text-teal-500 font-normal"></span>
                     </label>
                     <div class="relative">
                         <input
@@ -209,7 +196,7 @@
                         <button
                             type="button"
                             onclick={() => (showPassword = !showPassword)}
-                            class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition cursor-pointer"
+                            class="absolute right-3 top-1/2 -translate-y-1/2 text-teal-400 hover:text-teal-600 transition cursor-pointer"
                             tabindex="-1"
                         >
                             {#if showPassword}
@@ -251,7 +238,7 @@
                         </button>
                     </div>
                     {#if fieldErrors.password}
-                        <span class="text-xs text-red-500 dark:text-red-400"
+                        <span class="text-xs  text-red-400"
                             >{fieldErrors.password}</span
                         >
                     {/if}
@@ -277,8 +264,8 @@
                     <button
                         type="submit"
                         disabled={submitting}
-                        class="h-10 px-6 rounded-lg bg-blue-600 dark:bg-blue-500 text-white text-sm font-medium
-                               hover:bg-blue-700 dark:hover:bg-blue-600 active:scale-[0.98] transition
+                        class="h-10 px-6 rounded-lg bg-teal-600 dark:bg-teal-500 text-white text-sm font-medium
+                               hover:bg-teal-700 dark:hover:bg-teal-600 active:scale-[0.98] transition
                                disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                     >
                         {submitting ? "Saqlanmoqda" : "Saqlash"}
@@ -288,32 +275,26 @@
         </div>
 
         <div
-            class="bg-white dark:bg-slate-800 rounded-2xl border border-red-200 dark:border-red-900/50 shadow-sm overflow-hidden"
+            class="bg-transparent rounded-2xl border border-red-200 dark:border-red-900/50 shadow-sm overflow-hidden"
         >
             <div
-                class="px-6 py-4 border-b border-red-100 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20"
+                class="px-6 py-4 border-b border-red-100 dark:border-red-900/50 bg-red-50/10 dark:bg-red-900/20"
             >
                 <h2
                     class="text-base font-semibold text-red-700 dark:text-red-400"
                 >
                     Xafli zona
                 </h2>
-                <p class="text-sm text-red-400 dark:text-red-500 mt-0.5">
-                    Chiqish
+                <p class="text-sm text-red-400">
+                    Tizimdan chiqish
                 </p>
             </div>
             <div class="px-6 py-5 flex items-center justify-between gap-4">
                 <div>
-                    <p
-                        class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                    >
+                    <p class="text-sm font-medium text-teal-400">
                         Avtorizatsiya va authenticatsiya
                     </p>
-                    <p
-                        class="text-xs text-slate-400 dark:text-slate-500 mt-0.5"
-                    >
-                        Chiqish
-                    </p>
+                    <p class="text-xs text-teal-400 mt-0.5">Chiqish</p>
                 </div>
                 <button
                     onclick={logout}

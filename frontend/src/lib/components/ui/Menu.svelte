@@ -1,7 +1,7 @@
 <script lang="ts">
     import { page } from "$app/stores";
     import { goto } from "$app/navigation";
-    import { menuOpen, closeMenu } from "../../stores/menu";
+    import { menuOpen, closeMenu } from "../../../stores/menu";
 
     const navItems = [
         {
@@ -25,12 +25,14 @@
         return $page.url.pathname.startsWith(href);
     }
 </script>
+
 {#if $menuOpen}
     <div
         class="fixed inset-0 bg-black/40 z-30 md:hidden"
         onclick={closeMenu}
         aria-hidden="true"
     ></div>
+{/if}
 
 <aside
     class={`
@@ -39,24 +41,24 @@
         w-64 shrink-0
         flex flex-col
         bg-black
-        border-r  dark:border-teal-800
+        border-r dark:border-teal-800
         min-h-screen
-        transform transition-transform duration-300 ease-in-out
+        transition-all duration-300 ease-in-out
         ${$menuOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}
+        ${!$menuOpen ? "md:w-0 md:opacity-0 md:pointer-events-none md:border-none" : "md:w-64 md:opacity-100"}
+        overflow-hidden
     `}
 >
     <div
-        class="h-16 flex items-center justify-between px-5 border-b  border-teal-800 shrink-0"
+        class="h-16 flex items-center justify-between px-5 border-b border-teal-800 shrink-0"
     >
-        <span
-            class="text-base font-bold text-teal-400 tracking-tight"
-        >
+        <span class="text-base font-bold text-teal-400 tracking-tight">
             Zamonaviy fermer
         </span>
 
         <button
             onclick={closeMenu}
-            class="md:hidden flex items-center justify-center w-8 h-8 rounded-lg text-slate-500  hover:bg-green-100/10  transition cursor-pointer"
+            class="md:hidden flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-green-100/10 transition cursor-pointer"
             aria-label="Close menu"
         >
             <svg
@@ -100,10 +102,7 @@
         {/each}
     </nav>
 
-    <div
-        class="px-5 py-4 border-t border-teal-800 shrink-0"
-    >
+    <div class="px-5 py-4 border-t border-teal-800 shrink-0">
         <p class="text-xs text-teal-500">v1.0.0</p>
     </div>
 </aside>
-{/if}
