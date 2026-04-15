@@ -1,1 +1,1 @@
-export const ROOT_URL = "http://localhost:8000"; 
+export const ROOT_URL = "https://autowateringapi.up.railway.app"; 

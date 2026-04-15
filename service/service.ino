@@ -1,110 +1,108 @@
 #include <WiFi.h>
-#include <WebSocketsClient.h>  // WebSocketClient.h emas, WebSocketsClient.h
-#include <DHT.h>
+#include <WebSocketsClient.h>
 
 // ============ KONFIGURATSIYA ============
-// WiFi sozlamalari
 const char* ssid = "KOM_105";
 const char* password = "*kom105!0";
 
-// Backend server sozlamalari
-const char* serverHost = "192.168.1.100";
-const int serverPort = 8000;
-const char* secretToken = "esp32";
+// Railway backend - HTML testda ishlagan URL
+const char* serverHost = "autowateringapi.up.railway.app";
+const int serverPort = 80;  // HTTP port (ws://)
+const char* secretToken = "esp32_secret_token_123";  // HTML dagi bilan bir xil!
 
-// Sensor sozlamalari
-#define DHTPIN 34
-#define DHTTYPE DHT11
+#define SOIL_SENSOR_PIN 34
 
-// ============ GLOBAL O'ZGARUVCHILAR ============
-DHT dht(DHTPIN, DHTTYPE);
-WebSocketsClient webSocket;  // O'zgartirildi
-
+// ============ GLOBAL ============
+WebSocketsClient webSocket;
 unsigned long lastSendTime = 0;
-const unsigned long sendInterval = 2000;
+const unsigned long sendInterval = 5000;
+bool wsConnected = false;
 
-// ============ WEBSOCKET EVENT HANDLER ============
+const int DRY_VALUE = 3000;
+const int WET_VALUE = 1200;
+
+// ============ WEBSOCKET EVENT ============
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
   switch(type) {
     case WStype_DISCONNECTED:
-      Serial.println("❌ WebSocket uzildi!");
+      Serial.println("❌ WebSocket disconnected!");
+      wsConnected = false;
       break;
       
     case WStype_CONNECTED:
-      Serial.println("✅ WebSocket ulandi!");
+      Serial.println("✅ WebSocket connected!");
+      wsConnected = true;
       // Ulanish xabarini yuborish
-      webSocket.sendTXT("{\"type\": \"connect\", \"message\": \"ESP32 connected\"}");
+      webSocket.sendTXT("{\"type\":\"connect\",\"message\":\"ESP32 connected\"}");
       break;
       
     case WStype_TEXT:
-      Serial.print("📥 Serverdan kelgan xabar: ");
+      Serial.print("📥 Server: ");
       Serial.println((char*)payload);
       break;
       
     case WStype_ERROR:
-      Serial.println("❌ WebSocket xatosi!");
-      break;
-      
-    case WStype_BIN:
-      Serial.printf("📥 Binary data received: %u bytes\n", length);
+      Serial.println("❌ WebSocket error!");
+      wsConnected = false;
       break;
   }
 }
 
-// ============ FUNKSIYALAR ============
+// ============ SENSOR ============
+int readSoilMoisture() {
+  int sum = 0;
+  for (int i = 0; i < 10; i++) {
+    sum += analogRead(SOIL_SENSOR_PIN);
+    delay(5);
+  }
+  
+  int rawValue = sum / 10;
+  float moisture = (float)(rawValue - WET_VALUE) / (DRY_VALUE - WET_VALUE) * 100.0;
+  
+  if (moisture > 100) moisture = 100;
+  if (moisture < 0) moisture = 0;
+  
+  Serial.print("📊 Raw: ");
+  Serial.print(rawValue);
+  Serial.print(" → Moisture: ");
+  Serial.print(moisture);
+  Serial.println("%");
+  
+  return (int)moisture;
+}
 
-// WiFi ga ulanish
+// ============ WIFI ============
 void connectToWiFi() {
-  Serial.print("WiFi ga ulanish: ");
+  Serial.print("Connecting to WiFi: ");
   Serial.println(ssid);
   
   WiFi.begin(ssid, password);
   
-  while (WiFi.status() != WL_CONNECTED) {
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
     delay(500);
     Serial.print(".");
+    attempts++;
   }
   
-  Serial.println("\n✅ WiFi ulandi!");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n✅ WiFi connected!");
+    Serial.print("📡 IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\n❌ WiFi failed!");
+  }
 }
 
-// WebSocket ga ulanish
+// ============ WEBSOCKET ============
 void connectToWebSocket() {
-  Serial.println("WebSocket ga ulanish...");
+  Serial.println("🔌 Connecting to WebSocket...");
   
-  // WebSocket ulanish path
   String wsPath = "/ws/sensors/?secret=" + String(secretToken);
-  
-  // WebSocket sozlamalari
-  webSocket.begin(serverHost, serverPort, wsPath);
+
+  webSocket.beginSSL(serverHost, 443, wsPath); // 🔥 MUHIM
   webSocket.onEvent(webSocketEvent);
-  webSocket.setReconnectInterval(5000);  // 5 sekundda qayta ulanish
-}
-
-// Namlikni o'qish
-float readHumidity() {
-  float humidity = dht.readHumidity();
-  
-  if (isnan(humidity)) {
-    Serial.println("❌ DHT sensordan o'qish xatosi!");
-    return -1;
-  }
-  
-  return humidity;
-}
-
-// WebSocket orqali ma'lumot yuborish
-void sendSensorData(float humidity) {
-  // JSON formatda ma'lumot tayyorlash
-  String jsonData = "{\"value\": " + String(humidity) + "}";
-  
-  // Ma'lumotni yuborish
-  webSocket.sendTXT(jsonData);
-  
-  Serial.print("📤 Yuborildi: ");
-  Serial.println(jsonData);
+  webSocket.setReconnectInterval(5000);
 }
 
 // ============ SETUP ============
@@ -113,49 +111,63 @@ void setup() {
   delay(1000);
   
   Serial.println("\n=================================");
-  Serial.println("ESP32 Sensor WebSocket Client");
+  Serial.println("ESP32 Soil Moisture Sensor");
   Serial.println("=================================\n");
   
-  // DHT sensorini ishga tushirish
-  dht.begin();
-  Serial.println("✅ DHT sensori tayyor");
+  pinMode(SOIL_SENSOR_PIN, INPUT);
+  Serial.println("✅ Soil sensor ready");
   
-  // WiFi ga ulanish
   connectToWiFi();
   
-  // WebSocket ga ulanish
-  connectToWebSocket();
+  if (WiFi.status() == WL_CONNECTED) {
+    connectToWebSocket();
+  }
   
-  Serial.println("\n✅ Tizim tayyor!");
-  Serial.println("=================================\n");
+  Serial.println("\n✅ System ready!\n");
 }
 
 // ============ LOOP ============
 void loop() {
-  // WebSocket ni yangilash (muhim!)
   webSocket.loop();
   
-  // Belgilangan vaqt oralig'ida ma'lumot yuborish
-  unsigned long currentTime = millis();
-  if (currentTime - lastSendTime >= sendInterval) {
-    lastSendTime = currentTime;
-    
-    // Sensor ma'lumotini o'qish
-    float humidity = readHumidity();
-    
-    if (humidity > 0) {
-      // Ma'lumotni WebSocket orqali yuborish
-      sendSensorData(humidity);
-      
-      // Serial monitor ga chiqarish
-      Serial.print("🌡️ Namlik: ");
-      Serial.print(humidity);
-      Serial.println("%");
-    } else {
-      Serial.println("⚠️ Sensor o'qilmadi, keyingi urinishda...");
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠️ WiFi lost, reconnecting...");
+    connectToWiFi();
+    if (WiFi.status() == WL_CONNECTED) {
+      connectToWebSocket();
     }
   }
   
-  // Kichik delay
+  unsigned long now = millis();
+  if (now - lastSendTime >= sendInterval) {
+    lastSendTime = now;
+    
+    if (wsConnected) {
+      int moisture = readSoilMoisture();
+      
+      if (moisture >= 0 && moisture <= 100) {
+        String jsonData = "{\"value\": " + String(moisture) + "}";
+        webSocket.sendTXT(jsonData);
+        
+        Serial.print("📤 Sent: ");
+        Serial.print(moisture);
+        Serial.println("%");
+        
+        // Status
+        if (moisture < 30) {
+          Serial.println("💧 Status: DRY 🌵");
+        } else if (moisture < 70) {
+          Serial.println("💧 Status: NORMAL 🌱");
+        } else {
+          Serial.println("💧 Status: WET 💧");
+        }
+      } else {
+        Serial.println("⚠️ Sensor error!");
+      }
+    } else {
+      Serial.println("⏳ Waiting for WebSocket...");
+    }
+  }
+  
   delay(100);
 }

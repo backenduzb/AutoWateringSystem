@@ -1,18 +1,19 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import Chart from "chart.js/auto";
-    import { fade, fly } from "svelte/transition";
-
-    let current = $state(null);
-    let history = $state([]);
+    import { fly } from "svelte/transition";
+    import { ROOT_URL } from "$lib";
+    
+    // ============ STATE ============
+    let current: any = $state(null);
+    let history: any[] = $state([]);
     let isLoading = $state(true);
-    let wsStatus = $state('connecting'); // connecting, connected, error
-    let lastUpdate = $state(null);
-
-    let chartCanvas;
-    let chart;
-
-    // Helper functions
+    let wsStatus = $state('connecting'); 
+    let lastUpdate = $state<Date | null>(null);
+    let chartCanvas: HTMLCanvasElement;
+    let chart: Chart | null = $state(null);
+    
+    // ============ HELPER FUNCTIONS ============
     function getStatusClass() {
         if (wsStatus === 'connected') return 'bg-teal-400 animate-pulse';
         if (wsStatus === 'connecting') return 'bg-yellow-500 animate-pulse';
@@ -25,17 +26,62 @@
         return 'Reconnecting...';
     }
 
+    function getStatusTextValue(value: number) {
+        if (value == null) return '--';
+        if (value < 30) return 'Quruq 🌵';
+        if (value < 60) return 'Normal 🌱';
+        return 'Nam 💧';
+    }
+
+    function getStatusColor(value: number) {
+        if (value == null) return 'text-gray-400';
+        if (value < 30) return 'text-yellow-400';
+        if (value < 60) return 'text-teal-400';
+        return 'text-cyan-400';
+    }
+
+    function getProgressColor(value: number) {
+        if (value == null) return 'bg-gray-500';
+        if (value < 30) return 'bg-yellow-500';
+        if (value < 60) return 'bg-teal-500';
+        return 'bg-cyan-500';
+    }
+
+    // ============ CHART UPDATE ============
+    function updateChart() {
+        if (!chart) {
+            console.log("⚠️ Chart not initialized");
+            return;
+        }
+        
+        if (history.length === 0) {
+            console.log("📊 No history data");
+            return;
+        }
+
+        console.log(`📊 Updating chart with ${history.length} points`);
+        
+        chart.data.labels = history.map(i => {
+            const date = new Date(i.timestamp);
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        });
+
+        chart.data.datasets[0].data = history.map(i => i.value);
+        chart.update('none'); // 'none' - animatsiyasiz tezroq yangilanish
+    }
+
+    // ============ LOAD LATEST ============
     async function loadLatest() {
         const token = localStorage.getItem("access");
         
         if (!token) {
-            console.error("No token found");
+            console.error("❌ No token found");
             isLoading = false;
             return;
         }
 
         try {
-            const res = await fetch("http://localhost:8000/sensors/latest/", {
+            const res = await fetch(`${ROOT_URL}/sensors/latest/`, {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -46,94 +92,121 @@
             const json = await res.json();
             current = json.data;
             lastUpdate = new Date();
+            
+            if (current && current.value != null) {
+                history = [{
+                    value: current.value,
+                    timestamp: current.timestamp || new Date().toISOString()
+                }];
+                updateChart();
+            }
         } catch (err) {
-            console.error("Failed to load latest:", err);
+            console.error("❌ Failed to load latest:", err);
         } finally {
             isLoading = false;
         }
     }
 
-    function updateChart() {
-        if (!chart || history.length === 0) return;
+    // ============ WEBSOCKET ============
+    let ws: WebSocket | null = null;
+    let reconnectTimer: any = null;
 
-        chart.data.labels = history.map(i =>
-            new Date(i.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-        );
-
-        chart.data.datasets[0].data = history.map(i => i.value);
-        chart.update('none');
-    }
-
-    function getWStatusText(value) {
-        if (value == null) return '--';
-        if (value < 30) return 'Quruq 🌵';
-        if (value < 60) return 'Normal 🌱';
-        return 'Nam 💧';
-    }
-
-    function getStatusColor(value) {
-        if (value == null) return 'text-gray-400';
-        if (value < 30) return 'text-yellow-400';
-        if (value < 60) return 'text-teal-400';
-        return 'text-cyan-400';
-    }
-
-    function getProgressColor(value) {
-        if (value == null) return 'bg-gray-500';
-        if (value < 30) return 'bg-yellow-500';
-        if (value < 60) return 'bg-teal-500';
-        return 'bg-cyan-500';
-    }
-
-    $effect(() => {
+    function connectWebSocket() {
         const token = localStorage.getItem("access");
-        if (!token) return;
-
+        if (!token) {
+            console.error("❌ No token for WebSocket");
+            return;
+        }
+    
         wsStatus = 'connecting';
-        const ws = new WebSocket(`ws://localhost:8000/ws/updates/?token=${token}`);
-
+        
+        const wsUrl = ROOT_URL.replace("https://", "wss://") + `/ws/updates/?token=${token}`;
+        console.log("🔌 Connecting to WebSocket:", wsUrl);
+    
+        ws = new WebSocket(wsUrl);
+    
         ws.onopen = () => {
-            console.log("WebSocket connected");
+            console.log("✅ WebSocket connected");
             wsStatus = 'connected';
         };
-
+    
         ws.onmessage = (e) => {
             try {
                 const msg = JSON.parse(e.data);
-                console.log("WS message:", msg);
-
-                if (msg.type === "reading") {
-                    current = msg.data;
+                console.log("📨 Received:", msg);
+    
+                let newData = null;
+                
+                if (msg.type === "reading" && msg.data) {
+                    newData = msg.data;
+                } else if (msg.type === "sensor_update" && msg.data) {
+                    newData = msg.data;
+                } else if (msg.value != null) {
+                    newData = msg;
+                }
+                
+                if (newData && newData.value != null) {
+                    // MUHIM: Yangi state yaratish (reaktivlik uchun)
+                    current = { ...newData };
                     lastUpdate = new Date();
                     
-                    history = [...history.slice(-19), msg.data];
+                    // History ni yangilash (reaktivlik uchun yangi array)
+                    const newHistoryPoint = {
+                        value: newData.value,
+                        timestamp: newData.timestamp || new Date().toISOString()
+                    };
+                    
+                    history = [...history.slice(-19), newHistoryPoint];
+                    
+                    console.log(`📊 History: ${history.length} points, Current: ${newData.value}%`);
+                    
+                    // Chartni yangilash
                     updateChart();
                 }
             } catch (err) {
-                console.error("WS parse error:", err);
+                console.error("❌ Parse error:", err);
             }
         };
-
+    
         ws.onerror = (err) => {
-            console.error("WS error:", err);
+            console.error("❌ WS error:", err);
             wsStatus = 'error';
         };
-
+    
         ws.onclose = () => {
-            console.log("WS closed, reconnecting...");
+            console.log("❌ WS closed");
             wsStatus = 'error';
-            setTimeout(() => {
-                location.reload();
+            
+            // Auto reconnect
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(() => {
+                console.log("🔄 Reconnecting...");
+                connectWebSocket();
             }, 3000);
         };
+    }
 
-        return () => ws.close();
-    });
+    function disconnectWebSocket() {
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        if (ws) {
+            ws.close();
+            ws = null;
+        }
+    }
 
-    onMount(async () => {
-        await loadLatest();
+    // ============ INIT CHART ============
+    function initChart() {
+        if (!chartCanvas) {
+            console.log("⚠️ Canvas not ready");
+            return;
+        }
         
         const ctx = chartCanvas.getContext('2d');
+        if (!ctx) return;
+        
+        if (chart) {
+            chart.destroy();
+        }
         
         chart = new Chart(ctx, {
             type: "line",
@@ -159,16 +232,16 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: {
+                    duration: 0 // Real-time uchun animatsiyani o'chirish
+                },
                 plugins: {
                     legend: {
                         display: true,
                         position: "top",
                         labels: {
                             color: "#94a3b8",
-                            font: {
-                                size: 12,
-                                weight: "500"
-                            },
+                            font: { size: 12, weight: "500" },
                             boxWidth: 12,
                             boxHeight: 12
                         }
@@ -182,9 +255,7 @@
                         borderColor: "#14b8a6",
                         borderWidth: 1,
                         callbacks: {
-                            label: function(context) {
-                                return `Namlik: ${context.parsed.y}%`;
-                            }
+                            label: (context) => `Namlik: ${context.parsed.y}%`
                         }
                     }
                 },
@@ -192,69 +263,60 @@
                     y: {
                         beginAtZero: true,
                         max: 100,
-                        grid: {
-                            color: "#334155",
-                            drawBorder: false
-                        },
-                        title: {
-                            display: true,
-                            text: "Namlik (%)",
-                            color: "#94a3b8",
-                            font: {
-                                size: 11
-                            }
-                        },
-                        ticks: {
-                            color: "#94a3b8",
-                            stepSize: 20,
-                            callback: function(value) {
-                                return value + "%";
-                            }
-                        }
+                        grid: { color: "#334155", drawBorder: false },
+                        title: { display: true, text: "Namlik (%)", color: "#94a3b8", font: { size: 11 } },
+                        ticks: { color: "#94a3b8", stepSize: 20, callback: (v) => v + "%" }
                     },
                     x: {
-                        grid: {
-                            display: false,
-                            drawBorder: false
-                        },
-                        title: {
-                            display: true,
-                            text: "Vaqt",
-                            color: "#94a3b8",
-                            font: {
-                                size: 11
-                            }
-                        },
-                        ticks: {
-                            color: "#94a3b8",
-                            maxRotation: 45,
-                            minRotation: 45
-                        }
+                        grid: { display: false, drawBorder: false },
+                        title: { display: true, text: "Vaqt", color: "#94a3b8", font: { size: 11 } },
+                        ticks: { color: "#94a3b8", maxRotation: 45, minRotation: 45 }
                     }
                 },
-                interaction: {
-                    mode: 'nearest',
-                    axis: 'x',
-                    intersect: false
-                },
-                elements: {
-                    line: {
-                        borderJoin: 'round'
-                    }
-                }
+                interaction: { mode: 'nearest', axis: 'x', intersect: false }
             }
         });
+        
+        console.log("✅ Chart initialized");
+        
+        // Agar history bo'lsa, chartni yangilash
+        if (history.length > 0) {
+            updateChart();
+        }
+    }
+
+    // ============ WATCH HISTORY FOR CHART ============
+    // Svelte 5 da history o'zgarganda chartni yangilash
+    $effect(() => {
+        if (history.length > 0 && chart) {
+            updateChart();
+        }
+    });
+
+    // ============ ON MOUNT ============
+    onMount(async () => {
+        console.log("🚀 Component mounted");
+        
+        await loadLatest();
+        initChart();
+        connectWebSocket();
+        
+        return () => {
+            console.log("🧹 Cleaning up");
+            disconnectWebSocket();
+            if (chart) {
+                chart.destroy();
+                chart = null;
+            }
+        };
     });
 </script>
 
 <div class="min-h-screen bg-black">
-    <div class="fixed p-6 space-y-6 mt-10 w-[80%] right-10 top-0 h-screen overflow-y-auto">
-        
-        <div class="flex items-center justify-between animate-in fade-in slide-in-from-top duration-500">
+    <div class="fixed p-6 space-y-6 mt-10 w-[80%] right-10 top-6 h-screen overflow-y-auto">
+        <div class="flex items-center justify-between">
             <div>
-                <h1 class="text-2xl font-bold bg-black">
-                    Sensor Dashboard
-                </h1>
+                <h1 class="text-2xl font-bold text-white">Sensor Dashboard</h1>
                 <p class="text-sm text-teal-500 mt-1">Real-time monitoring</p>
             </div>
 
@@ -267,20 +329,13 @@
                 
                 <div class="flex items-center gap-2">
                     <div class="w-2 h-2 rounded-full {getStatusClass()}"></div>
-                    <span class="text-sm text-slate-400">
-                        {getStatusText()}
-                    </span>
+                    <span class="text-sm text-slate-400">{getStatusText()}</span>
                 </div>
             </div>
         </div>
-
         <div class="grid grid-cols-2 gap-5">
-            <div 
-                transition:fly={{ duration: 300, y: 20 }}
-                class="group relative overflow-hidden rounded-2xl bg-transparent backdrop-blur-md 
-                       border border-teal-700 hover:border-teal-500/30 transition-all duration-300
-                       hover:shadow-lg hover:shadow-teal-500/5"
-            >
+            <div class="group relative overflow-hidden rounded-2xl bg-transparent backdrop-blur-md 
+                        border border-teal-700 hover:border-teal-500/30 transition-all duration-300">
                 <div class="absolute top-0 right-0 w-32 h-32 bg-teal-500/5 rounded-full blur-2xl -mr-16 -mt-16"></div>
                 <div class="relative p-5">
                     <div class="flex items-center justify-between mb-3">
@@ -304,17 +359,15 @@
                     <p class="text-sm text-teal-500 mt-2">
                         {#if current?.value != null}
                             <span class={getStatusColor(current.value)}>
-                                {getStatusText(current.value)}
+                                {getStatusTextValue(current.value)}
                             </span>
                         {/if}
                     </p>
                 </div>
             </div>
-            <div 
-                transition:fly={{ duration: 300, y: 20, delay: 100 }}
-                class="group relative overflow-hidden rounded-2xl bg-transparent backdrop-blur-md 
-                       border border-teal-700 hover:border-teal-500/30 transition-all duration-300"
-            >
+            
+            <div class="group relative overflow-hidden rounded-2xl bg-transparent backdrop-blur-md 
+                        border border-teal-700 hover:border-teal-500/30 transition-all duration-300">
                 <div class="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 rounded-full blur-2xl -mr-16 -mt-16"></div>
                 <div class="relative p-5">
                     <div class="flex items-center justify-between mb-3">
@@ -348,11 +401,9 @@
                 </div>
             </div>
         </div>
-        <div 
-            transition:fly={{ duration: 400, y: 20, delay: 200 }}
-            class="rounded-2xl bg-transparent backdrop-blur-md border border-teal-700 
-                   hover:border-teal-500/30 transition-all duration-300 overflow-hidden"
-        >
+        
+        <div class="rounded-2xl bg-transparent backdrop-blur-md border border-teal-700 
+                    hover:border-teal-500/30 transition-all duration-300 overflow-hidden">
             <div class="border-b border-teal-700 px-6 py-4">
                 <div class="flex items-center justify-between">
                     <div>
@@ -374,8 +425,8 @@
                 </div>
             </div>
         </div>
+        
         <div class="text-center text-xs text-slate-600 pt-4">
-            <p>Real-time sensor monitoring | WebSocket connection</p>
         </div>
     </div>
 </div>
